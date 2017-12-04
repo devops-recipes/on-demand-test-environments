@@ -1,0 +1,14 @@
+ec2_instance_type: "${EC2_INSTANCE_TYPE}"
+ec2_image: "${EC2_IMAGE}"
+ec2_keypair: "${EC2_KEYPAIR}"
+ec2_user_data: "#!/bin/bash \n echo ECS_CLUSTER=\"${ECS_CLUSTER_NAME}\" >> /etc/ecs/ecs.config"
+ec2_region: "${EC2_REGION}"
+ec2_tag_Role: "${EC2_TAG_ROLE}"
+ec2_tag_Type: "${EC2_TAG_TYPE}"
+ec2_volume_size: ${EC2_VOLUME_SIZE}
+ec2_count: ${EC2_COUNT}
+STATE_RES_NAME: "${STATE_RES_NAME}"
+ec2_security_group: "${TEST_PUBLIC_SG_ID}"
+ec2_subnet_ids: ["${TEST_PUBLIC_SN_01_ID}","${TEST_PUBLIC_SN_02_ID}"]
+ec2_tag_Environment: "${ENVIRONMENT}"
+ECS_CLUSTER_NAME: "${ECS_CLUSTER_NAME}"

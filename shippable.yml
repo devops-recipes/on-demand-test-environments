@@ -1,0 +1,241 @@
+resources:
+
+#---------------------------------------------------------------#
+#-------------------- Common INFRA Resources -------------------#
+#---------------------------------------------------------------#
+
+# Security Ops scripts repo
+  - name: scripts_repo_odte
+    type: gitRepo
+    integration: "dr-github"
+    pointer:
+      sourceName: "devops-recipes/on-demand-test-environments"
+      branch: master
+
+# AWS CLI config
+  - name: aws_cli_config_odte
+    type: cliConfig
+    integration: dr-aws-keys
+    pointer:
+      region: us-east-1
+
+# SecOps approved AMI
+  - name: ami_sec_approved_odte
+    type: params
+    version:
+      params:
+        AMI_ID: "ami-9eb4b1e5"
+
+###---------------------------------------------------------------#
+###----------------------- BUILD/CI Resources --------------------#
+###---------------------------------------------------------------#
+
+# Front-end image
+  - name: vote_fe_odte
+    type: image
+    integration: dr-dockerhub
+    pointer:
+      sourceName: "devopsrecipes/vote_fe"
+    seed:
+      versionName: "master.3"
+
+# Back-end image
+  - name: vote_be_odte
+    type: image
+    integration: dr-dockerhub
+    pointer:
+      sourceName: "devopsrecipes/vote_be"
+    seed:
+      versionName: "master.2"
+
+  - name: vote_fe_options_odte
+    type: dockerOptions
+    version:
+      memory: 128
+      portMappings:
+        - "80:5000/tcp"
+      links:
+        - vote_be_odte:redis
+
+#---------------------------------------------------------------#
+#----------------------- TEST VPC Resources --------------------#
+#---------------------------------------------------------------#
+# TEST environment config
+
+  - name: test_conf_odte
+    type: params
+    version:
+      params:
+        EC2_REGION: "us-east-1"
+        EC2_TAG_ROLE: "dr-on-demand-test-environments"
+        EC2_TAG_TYPE: "ecs-container-instance"
+        EC2_VOLUME_SIZE: 30
+        EC2_COUNT: 1
+        STATE_RES_NAME: "test_info_odte"
+        ECS_CLUSTER_NAME: "test_env_ecs_odte"
+        ENVIRONMENT: "test"
+        EC2_INSTANCE_TYPE: "t2.large"
+        EC2_IMAGE: "ami-9eb4b1e5"
+        EC2_KEYPAIR: "ambarish-useast1"
+
+# Output of Test Provisioning
+  - name: test_info_odte
+    type: params
+    version:
+      params:
+        SEED: "initial_version"
+
+# Test VPC Info
+  - name: test_vpc_conf_odte
+    type: params
+    version:
+      params:
+        TEST_VPC_ID: "vpc-a36912da"
+        TEST_PUBLIC_SG_ID: "sg-c30fc8b6"
+        TEST_PUBLIC_SN_01_ID: "subnet-34378e50"
+        TEST_PUBLIC_SN_02_ID: "subnet-34378e50"
+        REGION: "us-east-1"
+
+
+# Reference to ECS Test Cluster
+  - name: test_env_ecs_odte
+    type: cluster
+    integration: "dr-aws-keys"
+    pointer:
+      sourceName : "test_env_ecs_odte"
+      region: "us-east-1"
+
+
+jobs:
+
+#---------------------------------------------------------------#
+#------------------- BUILD/CI with SHIPPABLE CI ----------------#
+#---------------------------------------------------------------#
+
+ # PACKAGE and push app front-end and back-end code into docker hub
+
+  - name: vote_be_runCI
+    type: runCI
+    steps:
+      - OUT: vote_be_odte
+
+  - name: vote_fe_runCI
+    type: runCI
+    steps:
+      - OUT: vote_fe_odte
+
+# DEFINE app micro service
+  - name: create_app_man_odte
+    type: manifest
+    steps:
+      - IN: vote_fe_odte
+      - IN: vote_fe_options_odte
+        applyTo:
+          - vote_fe_odte
+      - IN: vote_be_odte
+
+#---------------------------------------------------------------#
+#-------------- TEST Infra Prov Using ANsible  -----------------#
+#---------------------------------------------------------------#
+
+# PROV Test VPC with Ansible
+  - name: prov_test_vpc_odte
+    type: runSh
+    steps:
+      - IN: create_app_man_odte
+      - IN: aws_cli_config_odte
+        switch: off
+      - IN: ami_sec_approved_odte
+        switch: off
+      - IN: scripts_repo_odte
+        switch: off
+      - IN: test_conf_odte
+        switch: off
+      - IN: test_vpc_conf_odte
+        switch: off
+      - TASK:
+        - script: shipctl replace
+            $SCRIPTS_REPO_ODTE_STATE/infra/provision-ecs-ansible/ansible.cfg
+            $SCRIPTS_REPO_ODTE_STATE/infra/provision-ecs-ansible/group_vars/ecs-cluster-vars.yml
+        - script: sudo pip install boto3
+        - script: |
+            cd $SCRIPTS_REPO_ODTE_STATE/infra/provision-ecs-ansible
+            ansible-playbook -v ansible-ecs-provision.yml
+      - OUT: test_env_ecs_odte
+        overwrite: true
+      - OUT: test_info_odte
+    on_success:
+      - script: echo "SUCCESS"
+    on_failure:
+      - script: echo "FAILURE"
+
+##---------------------------------------------------------------#
+##-------------------- App Release Automation -------------------#
+##---------------------------------------------------------------#
+
+# DEPLOY to TEST environment
+  - name: deploy_app_test_odte
+    type: deploy
+    steps:
+      - IN: create_app_man_odte
+        switch: off
+      - IN: prov_test_vpc_odte
+      - IN: test_env_ecs_odte
+        switch: off
+      - TASK: managed
+
+# RUN System Integration Testing
+  - name: sit_odte
+    type: runSh
+    steps:
+      - IN: scripts_repo_odte
+        switch: off
+      - IN: test_info_odte
+      - IN: deploy_app_test_odte
+      - TASK:
+        # Run tests
+        - script: |
+            pushd $(shipctl get_resource_state "scripts_repo_odte")/tests
+              PARAMS_JSON=$(shipctl get_resource_version_key test_info_odte params)
+              CLUSTER_DNS=$(echo $PARAMS_JSON | jq -r .INST_0_PUBLIC_DNS)
+              echo "ECS Cluster DNS: "$CLUSTER_DNS
+              ./run-tests.sh $CLUSTER_DNS
+            popd
+    on_success:
+      - script: echo "SUCCESS"
+    on_failure:
+      - script: echo "FAILURE"
+
+#---------------------------------------------------------------#
+#----------------------- Deprov Test Infra----------------------#
+#---------------------------------------------------------------#
+
+# DEPROV TEST Infra with Ansible
+  - name: deprov_test_infra_odte
+    type: runSh
+    steps:
+      - IN: sit_odte
+      - IN: aws_cli_config_odte
+        switch: off
+      - IN: test_vpc_conf_odte
+        switch: off
+      - IN: test_conf_odte
+        switch: off
+      - IN: test_info_odte
+        switch: off
+      - IN: scripts_repo_odte
+        switch: off
+      - IN: ami_sec_approved_odte
+        switch: off
+      - TASK:
+        - script: shipctl replace
+            $SCRIPTS_REPO_ODTE_STATE/infra/provision-ecs-ansible/ansible.cfg
+            $SCRIPTS_REPO_ODTE_STATE/infra/provision-ecs-ansible/group_vars/ecs-cluster-vars.yml
+        - script: sudo pip install boto3
+        - script: |
+            cd $SCRIPTS_REPO_ODTE_STATE/infra/provision-ecs-ansible
+            ansible-playbook -v ansible-ecs-terminate.yml
+    on_success:
+      - script: echo "SUCCESS"
+    on_failure:
+      - script: echo "FAILURE"

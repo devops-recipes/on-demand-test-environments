@@ -1,0 +1,39 @@
+---
+- name: get list of services running in cluster
+  ecs_service_facts:
+    cluster: "{{ ECS_CLUSTER_NAME }}"
+  register: ecsservices
+
+- name: get list of task definitions for each service
+  ecs_service_facts:
+    details: true
+    service: "{{ item }}"
+    cluster: "{{ ECS_CLUSTER_NAME }}"
+  with_items: "{{ecsservices|json_query('ansible_facts.services[*]')}}"
+  when: ecsservices
+  register: service_details
+
+- name: extract task defintions
+  run_once: true
+  set_fact:
+    task_definition: "{{item.deployments[0].taskDefinition}}"
+  when: service_details
+  with_items: "{{service_details.results[0].ansible_facts.services}}"
+
+- name: Scale ECS services to 0
+  ecs_service:
+    name: "{{ item | basename }}"
+    state: present
+    desired_count: 0
+    task_definition: "{{ task_definition }}"
+    cluster: "{{ ECS_CLUSTER_NAME }}"
+  with_items: "{{ecsservices|json_query('ansible_facts.services[*]')}}"
+  when: ecsservices
+
+- name: Terminate ECS services
+  ecs_service:
+    name: "{{ item | basename }}"
+    state: absent
+    cluster: "{{ ECS_CLUSTER_NAME }}"
+  with_items: "{{ecsservices|json_query('ansible_facts.services[*]')}}"
+  when: ecsservices

@@ -1,0 +1,14 @@
+---
+### provision AWS ECS cluster
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  user: root
+  pre_tasks:
+    - include_vars: group_vars/ecs-cluster-vars.yml
+  roles:
+    - ecs-cluster-provision
+    - ec2-container-inst-provision
+  post_tasks:
+    - name: refresh hosts inventory list
+      meta: refresh_inventory

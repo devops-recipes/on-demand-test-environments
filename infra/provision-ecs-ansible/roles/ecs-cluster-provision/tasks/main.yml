@@ -1,0 +1,19 @@
+---
+# update Shippable resource state with this job number
+- name: run cmd
+  shell: |
+    shipctl post_resource_state "{{ STATE_RES_NAME }}" versionName "build-${BUILD_NUMBER}"
+
+# provision ECS cluster
+- name: Create ECS Cluster {{ ECS_CLUSTER_NAME }}
+  ecs_cluster:
+    name: "{{ ECS_CLUSTER_NAME }}"
+    state: present
+  register: ecs
+
+# update shippable resource state with provisioned cluster_arn
+- name: run cmd
+  shell: |
+    shipctl put_resource_state "{{ STATE_RES_NAME }}" CLUSTER_ARN "{{ ecs.cluster.clusterArn }}"
+    shipctl put_resource_state "{{ ECS_CLUSTER_NAME }}" TEST_ECS_CLUSTER_ID "{{ ecs.cluster.clusterArn }}"
+
