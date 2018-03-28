@@ -33,7 +33,7 @@ resources:
 # Front-end image
   - name: vote_fe_odte
     type: image
-    integration: dr-dockerhub
+    integration: drship_dockerhub
     pointer:
       sourceName: "devopsrecipes/vote_fe"
     seed:
@@ -42,7 +42,7 @@ resources:
 # Back-end image
   - name: vote_be_odte
     type: image
-    integration: dr-dockerhub
+    integration: drship_dockerhub
     pointer:
       sourceName: "devopsrecipes/vote_be"
     seed:
